@@ -1,5 +1,10 @@
+function noise_corrected_similarity_via_regression(...
+    correction_method, average_before_combining_terms, variance_centering) 
+
 % Assesses the equations we typically use to estimate explained variance via
 % regression
+% 
+% 2017-04-01: Several updates, SNH
 
 % external code repository
 root_directory = my_root_directory;
@@ -16,17 +21,17 @@ n_reps = 100;
 noise_factor = 1.5;
 
 % how to average across folds
-average_before_combining_terms = true;
+% average_before_combining_terms = true;
 
 % correction method
-correction_method = 'variance-based';
+% correction_method = 'variance-based';
 
 % whether or not to normalize variance across repetitions
 % only relevant for variance-based correction
-variance_centering = false;
+% variance_centering = false;
 
 % metric used to quantify similarity
-metrics = {'pearson'};%, 'demeaned-squared-error'};
+metrics = {'pearson', 'demeaned-squared-error'};
 n_metrics = length(metrics);
 
 % parameter that determine the degree of nonlinearity
@@ -49,7 +54,7 @@ n_folds = 2;
 
 % directory to save analysis results to
 analysis_directory = [root_directory '/technical-notes/analysis' ...
-    '/test-corrected-similarity-metrics'];
+    '/noise-corrected-similarity-via-regression'];
 if ~exist(analysis_directory, 'dir'); mkdir(analysis_directory); end
 
 % directory to save figures to
@@ -99,8 +104,9 @@ for z = 1:length(metrics)
                     '-noisefactor' num2str(noise_factor) ...
                     '-nfeats' num2str(n_features) '-nfolds' num2str(n_folds) ...
                     '-nreps' num2str(n_reps) ...
-                    '-average_before_combining_terms' num2str(average_before_combining_terms) ...
-                    '-varcenter' num2str(variance_centering)];
+                    '-averagebeforecombining' num2str(average_before_combining_terms) ...
+                    '-varcenter' num2str(variance_centering) ...
+                    '-' correction_method];
                 
                 MAT_file = [analysis_directory '/' param_idstring '.mat'];
                 if ~exist(MAT_file, 'file')
@@ -209,7 +215,7 @@ if n_alpha > 1
                 N = n_metrics*n_methods;
                 n_rows = round(sqrt(N));
                 n_cols = ceil(N/n_rows);
-                set(gcf, 'Position', [200 200 300*n_cols 200*n_rows]);
+                set(gcf, 'Position', [200 200 400*n_cols 300*n_rows]);
                 set(gcf, 'Color', [1 1 1]);
                 subplot(n_rows,n_cols, q + n_methods*(z-1));
                 
@@ -239,9 +245,12 @@ if n_alpha > 1
                 bounds = [min(alpha(:)), max(alpha(:))];
                 bounds = bounds + [-1 1]*diff(bounds)*0.1;
                 xlim(bounds);
-                fname = ['corr_vs_nonlinearity_noisefac' ...
-                    num2str(noise_factor) '_smpsize' num2str(sample_sizes(l)) ...
-                    '_nfeatures' num2str(n_features)];
+                fname = ['corr-vs-nonlinearity-noisefac' ...
+                    num2str(noise_factor) '-smpsize' num2str(sample_sizes(l)) ...
+                    '-nfeatures' num2str(n_features) ...
+                    '-averagebeforecombining' num2str(average_before_combining_terms) ...
+                    '-varcenter' num2str(variance_centering) ...
+                    '-' correction_method];
                 box off;
 
                 %                 set(gcf, 'PaperSize', [6*n_methods 6]);
@@ -251,7 +260,7 @@ if n_alpha > 1
             end
         end
         export_fig([figure_directory '/' fname '.pdf'], '-transparent', '-pdf');
-        export_fig([figure_directory '/' fname '.png'], '-png');
+        export_fig([figure_directory '/' fname '.png'], '-png', '-r150');
     end
 end
 
