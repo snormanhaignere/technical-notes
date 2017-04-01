@@ -15,8 +15,18 @@ n_reps = 100;
 % factor to multiply the noise by
 noise_factor = 1.5;
 
+% how to average across folds
+average_before_combining_terms = true;
+
+% correction method
+correction_method = 'variance-based';
+
+% whether or not to normalize variance across repetitions
+% only relevant for variance-based correction
+variance_centering = false;
+
 % metric used to quantify similarity
-metrics = {'pearson-nofolds', 'pearson',  'demeaned-squared-error'};
+metrics = {'pearson'};%, 'demeaned-squared-error'};
 n_metrics = length(metrics);
 
 % parameter that determine the degree of nonlinearity
@@ -56,9 +66,11 @@ prediction_test_retest = nan(n_reps, n_alpha, n_sample_sizes, n_methods, n_metri
 for z = 1:length(metrics)
     
     switch metrics{z}
-        case {'pearson', 'pearson-v1', 'pearson-nofolds'}
+        case {'pearson'}
+            funcname = 'pearson';
             simfunc = @fastcorr;
-        case 'demeaned-squared-error'
+        case {'demeaned-squared-error'}
+            funcname = 'demeaned-squared-error';
             simfunc = @corr_variance_sensitive_symmetric;
         otherwise
             error('Switch statement fell through');
@@ -86,7 +98,9 @@ for z = 1:length(metrics)
                     '-alpha' num2str(alpha(i)) ...
                     '-noisefactor' num2str(noise_factor) ...
                     '-nfeats' num2str(n_features) '-nfolds' num2str(n_folds) ...
-                    '-nreps' num2str(n_reps)];
+                    '-nreps' num2str(n_reps) ...
+                    '-average_before_combining_terms' num2str(average_before_combining_terms) ...
+                    '-varcenter' num2str(variance_centering)];
                 
                 MAT_file = [analysis_directory '/' param_idstring '.mat'];
                 if ~exist(MAT_file, 'file')
@@ -103,16 +117,14 @@ for z = 1:length(metrics)
                         F = randn(sample_sizes(k),n_features);
                         y = f_nonlin(F);
                         
-                        
-                        % [w, bestK, mse, r] = regress_weights_from_2way_crossval(F(folds==2,:), y(folds==2), 2);
-                        
                         % correlation with best linear approximation without noise
-                        [linear_prediction, mse, r, folds] = regress_predictions_from_3way_crossval(...
+                        [linear_prediction, mse, r, folds] = ...
+                            regress_predictions_from_3way_crossval(...
                             F, y, n_folds, methods{q}, 2.^(-100:100), n_folds);
                         
                         % correlation for non-noisy data
                         S.true_r(j) = correlation_within_folds(...
-                            y, linear_prediction, folds, metrics{z});
+                            y, linear_prediction, folds, funcname);
                         
                         % mean-squared error
                         S.true_mse(j) = mean((y-linear_prediction).^2);
@@ -131,32 +143,41 @@ for z = 1:length(metrics)
                         
                         % correlation of the noisy signal with the noisy prediction
                         S.noisy_r(j) = ...
-                            simfunc(y_noisy1, noisy_prediction1)/2 ...
-                            + simfunc(y_noisy2, noisy_prediction2)/2;
+                            correlation_within_folds(...
+                            y_noisy1, noisy_prediction1, folds, funcname)/2 ...
+                            + correlation_within_folds(...
+                            y_noisy2, noisy_prediction2, folds, funcname)/2;
                         
                         % mean-squared error for noisy mse
                         S.noisy_mse(j) = mean(([y_noisy1;y_noisy2]...
                             -[noisy_prediction1;noisy_prediction2]).^2);
                         
-                        % noise-correct
-                        if strcmp(metrics{z}, 'pearson-v1')
-                            S.noise_corrected_r(j) = ...
-                                normalized_correlation_within_folds(...
-                                [y_noisy1,y_noisy2], ...
-                                [noisy_prediction1, noisy_prediction2], ...
-                                folds);
-                        elseif strcmp(metrics{z}, 'pearson-nofolds')
-                            S.noise_corrected_r(j) = ...
-                                normalized_correlation(...
-                                [y_noisy1,y_noisy2], ...
-                                [noisy_prediction1, noisy_prediction2]);
-                        else
-                            S.noise_corrected_r(j) = ...
-                                normalized_correlation_within_folds_v2(...
-                                [y_noisy1,y_noisy2], ...
-                                [noisy_prediction1, noisy_prediction2], ...
-                                folds, 'same_noise', false, 'metric', metrics{z});
+                        
+                        switch correction_method
+                            case 'variance-based'
+                                S.noise_corrected_r(j) = ...
+                                    noise_corrected_similarity_within_folds(...
+                                    [y_noisy1,y_noisy2], ...
+                                    [noisy_prediction1, noisy_prediction2], ...
+                                    folds, 'same_noise', false, 'metric', metrics{z}, ...
+                                    'variance_centering', variance_centering, ...
+                                    'average_before_combining_terms', ...
+                                    average_before_combining_terms);
+                                
+                            case 'correlation-based'
+                                assert(strcmp(metrics{z}, 'pearson'));
+                                S.noise_corrected_r(j) = ...
+                                    normalized_correlation_within_folds(...
+                                    [y_noisy1,y_noisy2], ...
+                                    [noisy_prediction1, noisy_prediction2], ...
+                                    folds, 'z_averaging', false, ...
+                                    'average_before_combining_terms', ...
+                                    average_before_combining_terms);
+                                
+                            otherwise
+                                error('Switch statement fell through');
                         end
+                        
                     end
                     
                     save(MAT_file, 'S');
@@ -182,14 +203,18 @@ if n_alpha > 1
     
     for l = 1:n_sample_sizes
         figure;
-        set(gcf, 'Position', [200 200 500*n_methods 500]);
         for q = 1:n_methods
             for z = 1:n_metrics
                 
-                subplot(n_metrics,n_methods, q + n_methods*(z-1));
+                N = n_metrics*n_methods;
+                n_rows = round(sqrt(N));
+                n_cols = ceil(N/n_rows);
+                set(gcf, 'Position', [200 200 300*n_cols 200*n_rows]);
+                set(gcf, 'Color', [1 1 1]);
+                subplot(n_rows,n_cols, q + n_methods*(z-1));
                 
                 % -> rep x alpha x metric
-                X = cat(ndims(true_r)+1, true_r, noisy_r, noise_corrected_r);
+                X = cat(6, true_r, noisy_r, noise_corrected_r);
                 X = squeeze_dims(X(:,:,l,q,z,:),[3,4,5]);
                 
                 % -> alpha x metric
@@ -218,12 +243,15 @@ if n_alpha > 1
                     num2str(noise_factor) '_smpsize' num2str(sample_sizes(l)) ...
                     '_nfeatures' num2str(n_features)];
                 box off;
-                set(gcf, 'PaperSize', [6*n_methods 6]);
-                set(gcf, 'PaperPosition', [0.25 0.25 6*n_methods-0.5 5.5]);
-                print([figure_directory '/' fname '.pdf'],'-dpdf')
-                print([figure_directory '/' fname '.png'],'-dpng', '-r200');
+
+                %                 set(gcf, 'PaperSize', [6*n_methods 6]);
+                %                 set(gcf, 'PaperPosition', [0.25 0.25 6*n_methods-0.5 5.5]);
+                %                 print([figure_directory '/' fname '.pdf'],'-dpdf')
+                %                 print([figure_directory '/' fname '.png'],'-dpng', '-r200');
             end
         end
+        export_fig([figure_directory '/' fname '.pdf'], '-transparent', '-pdf');
+        export_fig([figure_directory '/' fname '.png'], '-png');
     end
 end
 
