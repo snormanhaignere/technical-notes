@@ -1,5 +1,6 @@
 function noise_corrected_similarity_via_regression(...
-    correction_method, average_before_combining_terms, variance_centering) 
+    correction_method, average_before_combining_terms, variance_centering, ...
+    n_folds, n_features, noise_factor, noise_corrected_crossval, regularization_metric) 
 
 % Assesses the equations we typically use to estimate explained variance via
 % regression
@@ -12,13 +13,13 @@ addpath(genpath([root_directory '/general-analysis-code']));
 addpath(genpath([root_directory '/export_fig_v2']));
 
 % number of features
-n_features = 5;
+% n_features = 10;
 
 % number of times to repeat the analysis
 n_reps = 100;
     
 % factor to multiply the noise by
-noise_factor = 1.5;
+% noise_factor = 1.5;
 
 % how to average across folds
 % average_before_combining_terms = true;
@@ -31,17 +32,28 @@ noise_factor = 1.5;
 % variance_centering = false;
 
 % metric used to quantify similarity
-metrics = {'pearson', 'demeaned-squared-error'};
+if strcmp(correction_method, 'correlation-based')
+    metrics = {'pearson'};
+else
+    metrics = {'pearson', 'demeaned-squared-error'};
+end
 n_metrics = length(metrics);
+
+% metric used for chosing the regularization parameter
+% regularization_metric = 'unnormalized-squared-error';
+
+% whether or not to use the noise-corrected metric to select the regularization 
+% parameter
+% noise_corrected_crossval = true;
 
 % parameter that determine the degree of nonlinearity
 % higher values indicate greater nonlinearitiy
 % alpha = linspace(1,3,10);
-alpha = [1 1.25 1.5 1.75];
+alpha = [1 1.25 1.5 1.75 2];
 n_alpha = length(alpha);
 
 % number of samples
-sample_sizes = 50;
+sample_sizes = 165;
 n_sample_sizes = length(sample_sizes);
 
 % methods
@@ -50,7 +62,7 @@ methods = {'ridge'};
 n_methods = length(methods);
 
 % number of folds to use for cross-validation
-n_folds = 2;
+% n_folds = 2;
 
 % directory to save analysis results to
 analysis_directory = [root_directory '/technical-notes/analysis' ...
@@ -69,7 +81,7 @@ noisy_mse = nan(n_reps, n_alpha, n_sample_sizes, n_methods, n_metrics);
 signal_test_retest = nan(n_reps, n_alpha, n_sample_sizes, n_methods, n_metrics);
 prediction_test_retest = nan(n_reps, n_alpha, n_sample_sizes, n_methods, n_metrics);
 for z = 1:length(metrics)
-    
+        
     switch metrics{z}
         case {'pearson'}
             funcname = 'pearson';
@@ -106,15 +118,16 @@ for z = 1:length(metrics)
                     '-nreps' num2str(n_reps) ...
                     '-averagebeforecombining' num2str(average_before_combining_terms) ...
                     '-varcenter' num2str(variance_centering) ...
-                    '-' correction_method];
-                
+                    '-' correction_method '-' regularization_metric ...
+                    '-noisecorrCV' num2str(noise_corrected_crossval)];
+                                
                 MAT_file = [analysis_directory '/' param_idstring '.mat'];
-                if ~exist(MAT_file, 'file')
+                if true || ~exist(MAT_file, 'file')
                     S.true_r = nan(n_reps, 1);
                     S.true_mse = nan(n_reps, 1);
                     S.noisy_r = nan(n_reps, 1);
                     S.noisy_mse = nan(n_reps, 1);
-                    S.noise_corrected_r = nan(n_reps, 1);
+                    S.noise_corrected_r = nan(n_reps, 1);                                  
                     for j = 1:n_reps
                         
                         fprintf('Rep %d\n', j); drawnow;
@@ -124,9 +137,12 @@ for z = 1:length(metrics)
                         y = f_nonlin(F);
                         
                         % correlation with best linear approximation without noise
-                        [linear_prediction, mse, r, folds] = ...
+                        [linear_prediction, ~, ~, folds] = ...
                             regress_predictions_from_3way_crossval(...
-                            F, y, n_folds, methods{q}, 2.^(-100:100), n_folds);
+                            F, y, 'test_folds', n_folds, 'train_folds', n_folds, ...
+                            'method', methods{q}, 'K', 2.^(-100:100), ...
+                            'regularization_metric', regularization_metric, ...
+                            'warning', false);
                         
                         % correlation for non-noisy data
                         S.true_r(j) = correlation_within_folds(...
@@ -140,13 +156,35 @@ for z = 1:length(metrics)
                         y_noisy2 = y + noise_factor * randn(sample_sizes(k),1);
                         
                         % cross-validated predictions from noisy data
-                        [noisy_prediction1, ~, ~, folds1] = regress_predictions_from_3way_crossval(...
-                            F, y_noisy1, n_folds, methods{q}, 2.^(-100:100), n_folds);
-                        [noisy_prediction2, ~, ~, folds2] = regress_predictions_from_3way_crossval(...
-                            F, y_noisy2, n_folds, methods{q}, 2.^(-100:100), n_folds);
-                        assert(all(folds1==folds2));
-                        folds = folds1; clear folds1 folds2;
-                        
+                        if noise_corrected_crossval
+                            [noisy_predictions, folds] = ...
+                                regress_predictions_from_3way_crossval_noisecorr(...
+                                F, [y_noisy1, y_noisy2], ...
+                                'test_folds', n_folds, 'train_folds', n_folds, ...
+                                'method', methods{q}, 'K', 2.^(-100:100), ...
+                                'regularization_metric', regularization_metric, ...
+                                'correction_method', correction_method, ...
+                                'warning', false);
+                            noisy_prediction1 = noisy_predictions(:,1);
+                            noisy_prediction2 = noisy_predictions(:,2);
+                        else
+                            [noisy_prediction1, ~, ~, folds1] = ...
+                                regress_predictions_from_3way_crossval(...
+                                F, y_noisy1, ...
+                                'test_folds', n_folds, 'train_folds', n_folds, ...
+                                'method', methods{q}, 'K', 2.^(-100:100), ...
+                                'regularization_metric', regularization_metric, ...
+                                'warning', false);
+                            [noisy_prediction2, ~, ~, folds2] = regress_predictions_from_3way_crossval(...
+                                F, y_noisy2, 'test_folds', n_folds, ...
+                                'test_folds', n_folds, 'train_folds', n_folds, ...
+                                'method', methods{q}, 'K', 2.^(-100:100), ...
+                                'regularization_metric', regularization_metric, ...
+                                'warning', false);
+                            assert(all(folds1==folds2));
+                            folds = folds1; clear folds1 folds2;
+                        end
+
                         % correlation of the noisy signal with the noisy prediction
                         S.noisy_r(j) = ...
                             correlation_within_folds(...
@@ -155,9 +193,8 @@ for z = 1:length(metrics)
                             y_noisy2, noisy_prediction2, folds, funcname)/2;
                         
                         % mean-squared error for noisy mse
-                        S.noisy_mse(j) = mean(([y_noisy1;y_noisy2]...
-                            -[noisy_prediction1;noisy_prediction2]).^2);
-                        
+                        S.noisy_mse(j) = mean(([y_noisy1; y_noisy2]...
+                            -[noisy_prediction1; noisy_prediction2]).^2);
                         
                         switch correction_method
                             case 'variance-based'
@@ -245,13 +282,6 @@ if n_alpha > 1
                 bounds = [min(alpha(:)), max(alpha(:))];
                 bounds = bounds + [-1 1]*diff(bounds)*0.1;
                 xlim(bounds);
-                fname = ['corr-vs-nonlinearity-noisefac' ...
-                    num2str(noise_factor) '-smpsize' num2str(sample_sizes(l)) ...
-                    '-nfeatures' num2str(n_features) ...
-                    '-averagebeforecombining' num2str(average_before_combining_terms) ...
-                    '-varcenter' num2str(variance_centering) ...
-                    '-' correction_method];
-                box off;
 
                 %                 set(gcf, 'PaperSize', [6*n_methods 6]);
                 %                 set(gcf, 'PaperPosition', [0.25 0.25 6*n_methods-0.5 5.5]);
@@ -259,6 +289,20 @@ if n_alpha > 1
                 %                 print([figure_directory '/' fname '.png'],'-dpng', '-r200');
             end
         end
+        
+        fname = ['corr-vs-nonlinearity-noisefac' ...
+            num2str(noise_factor) '-smpsize' num2str(sample_sizes(l)) ...
+            '-nfeatures' num2str(n_features) ...
+            '-averagebeforecombining' num2str(average_before_combining_terms) ...
+            '-varcenter' num2str(variance_centering) ...
+            '-' correction_method '-nfolds' num2str(n_folds)...
+            '-' regularization_metric];
+        box off;
+        
+        if noise_corrected_crossval
+            fname = [fname '-noisecorrCV'];
+        end
+
         export_fig([figure_directory '/' fname '.pdf'], '-transparent', '-pdf');
         export_fig([figure_directory '/' fname '.png'], '-png', '-r150');
     end
