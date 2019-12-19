@@ -1,10 +1,10 @@
 correction_methods = {'variance-based'};
 average_before_combining_terms = true;
-n_folds = [2, 4];
+n_folds = [4];
 n_features = 10;
 noise_factor = [2, 3];
 noise_corrected_crossval = [true, false];
-regularization_metric = {'demeaned-squared-error', 'unnormalized-squared-error', 'pearson'};
+regularization_metric = {'normalized-squared-error'}; %{'demeaned-squared-error', 'unnormalized-squared-error', 'pearson'};
 
 for n = 1:length(noise_factor)
     for m = 1:length(n_features)

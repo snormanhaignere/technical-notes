@@ -3,7 +3,7 @@
 % 2017-05-24: Created, Sam NH
 
 % complex stimulus
-X = randn(3,5) + sqrt(-1)*randn(3,5);
+X = randn(4,5) + sqrt(-1)*randn(4,5);
 
 % covariance
 C = X*transpose(conj(X));
@@ -26,4 +26,4 @@ SV - S*V'
 
 % projection onto V
 US = X * V;
-US - U*S
+US - U*S;

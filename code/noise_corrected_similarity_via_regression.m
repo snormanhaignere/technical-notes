@@ -35,7 +35,7 @@ n_reps = 100;
 if strcmp(correction_method, 'correlation-based')
     metrics = {'pearson'};
 else
-    metrics = {'pearson', 'demeaned-squared-error'};
+    metrics = {'normalized-squared-error'};%, 'pearson', 'demeaned-squared-error'};
 end
 n_metrics = length(metrics);
 
@@ -89,6 +89,9 @@ for z = 1:length(metrics)
         case {'demeaned-squared-error'}
             funcname = 'demeaned-squared-error';
             simfunc = @corr_variance_sensitive_symmetric;
+        case {'normalized-squared-error'}
+            funcname = 'normalized-squared-error';
+            simfunc = @normalized_squared_error;
         otherwise
             error('Switch statement fell through');
     end
@@ -122,7 +125,7 @@ for z = 1:length(metrics)
                     '-noisecorrCV' num2str(noise_corrected_crossval)];
                                 
                 MAT_file = [analysis_directory '/' param_idstring '.mat'];
-                if true || ~exist(MAT_file, 'file')
+                if ~exist(MAT_file, 'file')
                     S.true_r = nan(n_reps, 1);
                     S.true_mse = nan(n_reps, 1);
                     S.noisy_r = nan(n_reps, 1);
@@ -303,8 +306,12 @@ if n_alpha > 1
             fname = [fname '-noisecorrCV'];
         end
 
-        export_fig([figure_directory '/' fname '.pdf'], '-transparent', '-pdf');
-        export_fig([figure_directory '/' fname '.png'], '-png', '-r150');
+        fname_full_path = [figure_directory '/' fname];
+        set(gcf, 'PaperSize', [8 8]);
+        set(gcf, 'PaperPosition', [0.25 0.25 7.5 7.5]);
+        print([fname_full_path '.pdf'], '-dpdf');
+        % export_fig([figure_directory '/' fname '.pdf'], '-transparent', '-pdf');
+        % export_fig([figure_directory '/' fname '.png'], '-png', '-r150');
     end
 end
 
